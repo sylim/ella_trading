@@ -143,26 +143,44 @@ def calc_sharpe(series: pd.Series) -> float:
     return round((ex.mean() / ex.std()) * np.sqrt(252), 2) if ex.std() > 0 else 0.0
 
 
-def signal_badge(rsi, pbr, mom3) -> list[tuple[str,str]]:
-    """(텍스트, 설명) 리스트 반환"""
+def signal_badge(rsi, pbr, mom3) -> list[tuple[str, str, str]]:
+    """
+    (텍스트, 설명, 색상) 리스트 반환
+    색상: red(위험) | green(매수기회) | blue(안정) | yellow(주의/중간)
+    """
     badges = []
+
+    # RSI
     if not np.isnan(rsi):
         if rsi >= 70:
-            badges.append(("🔴 RSI 과매수", f"RSI {rsi:.0f} — 단기 과열, 신규 매수 신중히"))
-        elif rsi <= 30:
-            badges.append(("🟢 RSI 과매도", f"RSI {rsi:.0f} — 단기 낙폭 과대, 매수 기회 탐색"))
+            badges.append(("🔴 RSI 과매수", f"RSI {rsi:.0f} — 단기 과열. 추격 매수 위험, 관망 또는 분할 매도 고려", "red"))
+        elif rsi >= 50:
+            badges.append(("🟡 RSI 상승 중", f"RSI {rsi:.0f} — 상승 흐름이나 과열 경계 주의", "yellow"))
+        elif rsi >= 30:
+            badges.append(("🔵 RSI 안정", f"RSI {rsi:.0f} — 중립 구간, 보유 유지", "blue"))
         else:
-            badges.append(("🔵 RSI 중립", f"RSI {rsi:.0f}"))
+            badges.append(("🟢 RSI 과매도", f"RSI {rsi:.0f} — 단기 낙폭 과대, 매수 기회 탐색", "green"))
+
+    # PBR
     if pbr > 0:
-        if pbr < 1:
-            badges.append(("🟢 PBR 저평가", f"PBR {pbr:.2f} — 장부가 이하, 구조적 저평가"))
-        elif pbr > 3:
-            badges.append(("🟠 PBR 고평가", f"PBR {pbr:.2f} — 고성장 기대 반영, 실적 미달 시 급락 위험"))
+        if pbr > 3:
+            badges.append(("🔴 PBR 고평가", f"PBR {pbr:.2f}배 — 고성장 기대 반영. 실적 미달 시 급락 위험", "red"))
+        elif pbr > 1:
+            badges.append(("🔵 PBR 적정", f"PBR {pbr:.2f}배 — 적정 밸류에이션 구간", "blue"))
+        else:
+            badges.append(("🟢 PBR 저평가", f"PBR {pbr:.2f}배 — 장부가 이하, 구조적 저평가 구간", "green"))
+
+    # 모멘텀
     if not np.isnan(mom3):
-        if mom3 > 15:
-            badges.append(("⬆ 모멘텀 강", f"3개월 수익률 {mom3:+.1f}%"))
-        elif mom3 < -15:
-            badges.append(("⬇ 모멘텀 약", f"3개월 수익률 {mom3:+.1f}%"))
+        if mom3 < -15:
+            badges.append(("🔴 모멘텀 약", f"3개월 {mom3:+.1f}% — 하락 추세, 추가 하락 가능성", "red"))
+        elif mom3 < 0:
+            badges.append(("🟡 모멘텀 둔화", f"3개월 {mom3:+.1f}% — 약세 흐름, 추이 주시", "yellow"))
+        elif mom3 <= 15:
+            badges.append(("🔵 모멘텀 보합", f"3개월 {mom3:+.1f}% — 완만한 상승, 안정적", "blue"))
+        else:
+            badges.append(("🟡 모멘텀 강", f"3개월 {mom3:+.1f}% — 강한 상승. 단기 과열 여부 RSI로 교차 확인", "yellow"))
+
     return badges
 
 
@@ -196,8 +214,15 @@ def render_stock_tab(name: str, ticker: str, prices: pd.DataFrame,
     badges = signal_badge(rsi, pbr, mom3)
     if badges:
         st.markdown("**📌 시그널**")
-        for badge, desc in badges:
-            st.info(f"**{badge}** — {desc}")
+        for badge, desc, color in badges:
+            if color == "red":
+                st.error(f"**{badge}** — {desc}")
+            elif color == "green":
+                st.success(f"**{badge}** — {desc}")
+            elif color == "yellow":
+                st.warning(f"**{badge}** — {desc}")
+            else:
+                st.info(f"**{badge}** — {desc}")
 
     st.divider()
 
@@ -293,7 +318,7 @@ def render_overview_tab(names, prices, mom_df, rsi_latest, sharpe_data, valuatio
         v     = valuations.get(name, {})
         rsi   = rsi_latest.get(name, np.nan)
         mom3  = mom_df.loc[name, "3M"] if name in mom_df.index else np.nan
-        badges = [b[0] for b in signal_badge(rsi, v.get("PBR",0), mom3)]
+        badges = [b[0] for b in signal_badge(rsi, v.get("PBR", 0), mom3)]
         rows.append({
             "종목":     name,
             "현재가":   f"{prices[name].dropna().iloc[-1]:,.0f}",
