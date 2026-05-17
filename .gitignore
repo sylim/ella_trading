@@ -1,0 +1,8 @@
+*.sh
+*.png
+__pycache__/
+*.pyc
+.env
+.DS_Store
+backtest_result.png
+portfolio_dashboard.png
