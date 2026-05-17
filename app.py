@@ -15,7 +15,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import requests
 from xml.etree import ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # ── 설정 ───────────────────────────────────────────────
 st.set_page_config(
@@ -36,11 +36,20 @@ PORTFOLIO = {
 
 START = "2024-01-01"
 COLORS = px.colors.qualitative.Bold
+KST = timezone(timedelta(hours=9))
+
+
+def get_cache_key() -> str:
+    """매일 오전 8:30 KST 기준으로 캐시 키 갱신"""
+    now = datetime.now(KST)
+    cutoff = now.replace(hour=8, minute=30, second=0, microsecond=0)
+    base = now if now >= cutoff else now - timedelta(days=1)
+    return base.strftime("%Y-%m-%d")
 
 
 # ── 데이터 수집 (TTL 6시간 캐시) ─────────────────────────
-@st.cache_data(ttl=21600, show_spinner=False)
-def get_naver_chart(ticker: str, count: int = 400) -> pd.DataFrame:
+@st.cache_data(show_spinner=False)
+def get_naver_chart(ticker: str, count: int = 400, cache_key: str = "") -> pd.DataFrame:
     url = f"https://fchart.stock.naver.com/sise.nhn?symbol={ticker}&timeframe=day&count={count}&requestType=0"
     try:
         r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
@@ -62,8 +71,8 @@ def get_naver_chart(ticker: str, count: int = 400) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
-def load_prices() -> pd.DataFrame:
+@st.cache_data(show_spinner=False)
+def load_prices(cache_key: str = "") -> pd.DataFrame:
     closes = {}
     for name, ticker in PORTFOLIO.items():
         try:
@@ -73,14 +82,14 @@ def load_prices() -> pd.DataFrame:
                 continue
         except Exception:
             pass
-        df = get_naver_chart(ticker)
+        df = get_naver_chart(ticker, cache_key=cache_key)
         if not df.empty:
             closes[name] = df[df.index >= START]["Close"]
     return pd.DataFrame(closes).ffill().dropna(how="all")
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
-def get_valuation(ticker: str) -> dict:
+@st.cache_data(show_spinner=False)
+def get_valuation(ticker: str, cache_key: str = "") -> dict:
     try:
         r = requests.get(
             f"https://m.stock.naver.com/api/stock/{ticker}/integration",
@@ -153,11 +162,13 @@ def get_signal(rsi, pbr, mom3) -> tuple[str, str]:
 # ── 메인 UI ─────────────────────────────────────────────
 def main():
     st.title("📈 주식 포트폴리오 대시보드")
-    st.caption(f"마지막 업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M')} KST · 6시간마다 자동 갱신")
+    ck = get_cache_key()
+    now_kst = datetime.now(KST)
+    st.caption(f"기준일: {ck} · 매일 오전 8:30 KST 갱신 · 현재시각: {now_kst.strftime('%H:%M')} KST")
 
     with st.spinner("데이터 수집 중..."):
-        prices = load_prices()
-        valuations = {name: get_valuation(ticker) for name, ticker in PORTFOLIO.items()
+        prices = load_prices(cache_key=ck)
+        valuations = {name: get_valuation(ticker, cache_key=ck) for name, ticker in PORTFOLIO.items()
                       if name in prices.columns}
 
     names = list(prices.columns)
